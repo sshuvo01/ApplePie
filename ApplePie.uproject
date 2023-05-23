@@ -1,0 +1,17 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "{20C62C5F-4EC1-E580-9BBC-01B9EB8F6E6F}",
+	"Category": "",
+	"Description": "",
+	"Modules": [
+		{
+			"Name": "ApplePie",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"UMG",
+				"Engine"
+			]
+		}
+	]
+}
