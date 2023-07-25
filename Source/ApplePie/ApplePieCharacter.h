@@ -4,15 +4,17 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "ApplePieAmmoType.h"
 #include "ApplePieCharacter.generated.h"
 
 UENUM(BlueprintType)
-enum class EAmmoType : uint8
+enum class ECombatState : uint8
 {
-	EAT_9mm UMETA(DisplayName = "9mm"),
-	EAT_AR UMETA(Displayname = "AssaultRifle"),
+	ECS_Unoccupied UMETA(DisplayName = "Unoccupied"),
+	ECS_FiringWeapon UMETA(Displayname = "FiringWeapon"),
+	ECS_ReloadingWeapon UMETA(Displayname = "ReloadingWeapon"),
 
-	EAT_MAX UMETA(DisplayName = "DefaultMAX")
+	ECS_MAX UMETA(DisplayName = "DefaultMAX")
 };
 
 UCLASS()
@@ -61,6 +63,29 @@ protected:
 	bool TraceUnderCrosshairs(FHitResult& OutHitResult, FVector& OutHitLocation) const;
 
 	void InitializeAmmoMap();
+
+	bool WeaponHasAmmo() const;
+
+	void PlayFireSound();
+	void SendBullet();
+	void PlayWeaponFireAnimation();
+
+	void ReloadButtonPressed();
+	void ReloadWeapon();
+	bool CarryingWeaponAmmo() const;
+
+	/** Montage for firing the weapon */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, meta = (AllowPrivateAccess = "true"), Category = Combat)
+	class UAnimMontage* ReloadMontage;
+
+	UFUNCTION(BlueprintCallable)
+	void FinishReloading();
+
+	UFUNCTION(BlueprintCallable)
+	void OnClipGrabbed();
+
+	UFUNCTION(BlueprintCallable)
+	void OnClipReplaced();
 
 public:	
 	// Called every frame
@@ -226,6 +251,17 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = true), Category = Items)
 	int32 StartingARAmmoCount = 120;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"), Category = "Combat")
+	ECombatState CombatState;
+
+	/** Transform of the clip when we first grab the clip during reloading */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"), Category = "Combat")
+	FTransform ClipTransform;
+
+	/** Scene component to attach to the Character's hand during reloading */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"), Category = "Combat")
+	USceneComponent* HandSceneComponent;
 
 public:
 	FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }

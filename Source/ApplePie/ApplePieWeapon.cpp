@@ -5,9 +5,20 @@
 
 AApplePieWeapon::AApplePieWeapon()
 	: ThrowTime{ 0.8f },
-	bFalling{ false }
+	bFalling{ false },
+	AmmoType{ EAmmoType::EAT_9mm },
+	ReloadMontageSection{ FName{TEXT("Reload SMG")} },
+	AmmoCount{ 30 },
+	MagazineCapacity{ 30 },
+	ClipBoneName{ FName{ TEXT("smg_clip")}}
 {
 	PrimaryActorTick.bCanEverTick = true;
+}
+
+void AApplePieWeapon::ReloadAmmo(int32 InAmmoCount)
+{
+	checkf(AmmoCount + InAmmoCount <= MagazineCapacity, TEXT("Oh no more than this magazine can carry"));
+	AmmoCount += InAmmoCount;
 }
 
 void AApplePieWeapon::Tick(float DeltaTime)
@@ -46,4 +57,16 @@ void AApplePieWeapon::StopFalling()
 {
 	bFalling = false;
 	SetState(EItemState::EIS_Pickup);
+}
+
+void AApplePieWeapon::DecrementAmmoCount()
+{
+	if (AmmoCount - 1 < 0)
+	{
+		AmmoCount = 0;
+	}
+	else
+	{
+		AmmoCount--;
+	}
 }

@@ -99,6 +99,12 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Properties, meta = (AllowPrivateAccess = true))
 	class AApplePieCharacter* Character;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Properties, meta = (AllowPrivateAccess = true))
+	class USoundCue* PickupSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Properties, meta = (AllowPrivateAccess = true))
+	class USoundCue* EquipSound;
+
 	FTimerHandle InterpTimerHandle;
 
 	float InterpZTime;
@@ -137,6 +143,9 @@ public:
 	FORCEINLINE  USkeletalMeshComponent* GetMesh() const { return Mesh; }
 
 	FORCEINLINE EItemState GetState() const { return State; }
+
+	FORCEINLINE USoundCue* GetPickupSound() const { return PickupSound; }
+	FORCEINLINE USoundCue* GetEquipSound() const { return EquipSound; }
 
 	void StartInterping(AApplePieCharacter* InCharacter);
 };

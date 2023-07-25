@@ -40,7 +40,8 @@ AApplePieCharacter::AApplePieCharacter()
 	bTraceForItems{ false },
 	// Camera interp location variables
 	CameraInterpDistance{ 250.f },
-	CameraInterpElevation{ 65.f }
+	CameraInterpElevation{ 65.f },
+	CombatState{ ECombatState::ECS_Unoccupied  }
 {
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
@@ -66,6 +67,8 @@ AApplePieCharacter::AApplePieCharacter()
 	MovementComponent->RotationRate = FRotator{ 0.f, 540.f, 0.f };
 	MovementComponent->JumpZVelocity = 600.f;
 	MovementComponent->AirControl = 0.2f;
+
+	HandSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("HandSceneComp"));
 }
 
 // Called when the game starts or when spawned
@@ -159,8 +162,112 @@ void AApplePieCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 
 	PlayerInputComponent->BindAction(TEXT("Select"), IE_Pressed, this, &ThisClass::SelectButtonPressed);
 	PlayerInputComponent->BindAction(TEXT("Select"), IE_Released, this, &ThisClass::SelectButtonReleased);
+
+	PlayerInputComponent->BindAction(TEXT("Reload"), IE_Pressed, this, &ThisClass::ReloadButtonPressed);
 }
 
+
+void AApplePieCharacter::ReloadButtonPressed()
+{
+	ReloadWeapon();
+}
+
+void AApplePieCharacter::FinishReloading()
+{
+	CombatState = ECombatState::ECS_Unoccupied;
+	
+	if (!EquippedWeapon)
+	{
+		return;
+	}
+
+	if (int32* CarriedAmmoCount = AmmoMap.Find(EquippedWeapon->GetAmmoType()))
+	{
+		//(*AmmoCount) -= EquippedWeapon->GetMagazineCapacity();
+		const int32 MagEmptyCapacity = EquippedWeapon->GetMagazineCapacity() - EquippedWeapon->GetAmmoCount();
+		if (MagEmptyCapacity > *CarriedAmmoCount)
+		{
+			EquippedWeapon->ReloadAmmo(*CarriedAmmoCount);
+			*CarriedAmmoCount = 0;
+		}
+		else
+		{
+			EquippedWeapon->ReloadAmmo(MagEmptyCapacity);
+			(*CarriedAmmoCount) -= MagEmptyCapacity;
+		}
+	}
+}
+
+void AApplePieCharacter::OnClipGrabbed()
+{
+	if (!EquippedWeapon || !HandSceneComponent)
+	{
+		return;
+	}
+	FName BoneName = EquippedWeapon->GetClipBoneName();
+	int32 ClipBoneIndex = EquippedWeapon->GetMesh()->GetBoneIndex(MoveTemp(BoneName));
+	
+	ClipTransform = EquippedWeapon->GetMesh()->GetBoneTransform(ClipBoneIndex);
+	
+	FAttachmentTransformRules AttachmentRules(EAttachmentRule::KeepRelative, true);
+	HandSceneComponent->AttachToComponent(GetMesh(), AttachmentRules, FName(TEXT("hand_l")));
+	HandSceneComponent->SetWorldTransform(ClipTransform);
+
+	EquippedWeapon->SetMovingClip(true);
+}
+
+void AApplePieCharacter::OnClipReplaced()
+{
+	if (!EquippedWeapon)
+	{
+		return;
+	}
+	// TODO: when do we set it back to false?
+	//EquippedWeapon->bMovingClip
+}
+
+void AApplePieCharacter::ReloadWeapon()
+{
+	if (CombatState != ECombatState::ECS_Unoccupied || !EquippedWeapon)
+	{
+		return;
+	}
+
+	if (!CarryingWeaponAmmo())
+	{
+		return;
+	}
+	// Do we have ammo of the correct type?
+	// TODO: check if we have the correct type of ammo
+	// TODO: Create an enum for weapon type
+	// TODO: switch on the correct weapon type based on the epuipped weapon
+
+	//FName MontageSection = TEXT("Reload SMG");
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
+	{
+		if (ReloadMontage)
+		{
+			CombatState = ECombatState::ECS_ReloadingWeapon;
+			AnimInstance->Montage_Play(ReloadMontage);
+			AnimInstance->Montage_JumpToSection(EquippedWeapon->GetReloadMontageSection());
+		}
+	}
+}
+
+bool AApplePieCharacter::CarryingWeaponAmmo() const
+{
+	if (!EquippedWeapon)
+	{
+		return false;
+	}
+
+	if (AmmoMap.Contains(EquippedWeapon->GetAmmoType()))
+	{
+		return AmmoMap[EquippedWeapon->GetAmmoType()] > 0;
+	}
+
+	return false;
+}
 
 void AApplePieCharacter::MoveForward(float Value)
 {
@@ -188,14 +295,41 @@ void AApplePieCharacter::MoveRight(float Value)
 
 void AApplePieCharacter::FireWeapon()
 {
+	if (!EquippedWeapon 
+		|| CombatState != ECombatState::ECS_Unoccupied)
+	{
+		return;
+	}
+
+	if (WeaponHasAmmo())
+	{
+		// Play fire sound
+		PlayFireSound();
+		// Send bullet
+		SendBullet();
+		// Play Gun Fire montage
+		PlayWeaponFireAnimation();
+		// Start bullet fire time for crosshair
+		StartCrosshairBulletFire();
+		EquippedWeapon->DecrementAmmoCount();
+		StartFireTimer();
+	}
+
+}
+
+void AApplePieCharacter::PlayFireSound()
+{
 	if (FireSound)
 	{
 		UGameplayStatics::PlaySound2D(this, FireSound);
 	}
+}
 
-	if (const USkeletalMeshSocket* BarrelSocket = GetMesh()->GetSocketByName(TEXT("BarrelSocket")))
+void AApplePieCharacter::SendBullet()
+{
+	if (const USkeletalMeshSocket* BarrelSocket = EquippedWeapon->GetMesh()->GetSocketByName(TEXT("BarrelSocket")))
 	{
-		const FTransform SocketTransform = BarrelSocket->GetSocketTransform(GetMesh());
+		const FTransform SocketTransform = BarrelSocket->GetSocketTransform(EquippedWeapon->GetMesh());
 		if (MuzzleFlash)
 		{
 			UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), MuzzleFlash, SocketTransform);
@@ -216,71 +350,17 @@ void AApplePieCharacter::FireWeapon()
 				ParticleComponent->SetVectorParameter(FName{ TEXT("Target") }, HitLocation);
 			}
 		}
-		/*
-		FVector2D ViewportSize;
-		if (GEngine && GEngine->GameViewport)
-		{
-			GEngine->GameViewport->GetViewportSize(ViewportSize);
-		}
-
-		// TODO: Find a way to not hardcode this
-		const FVector2D CrossHairScreenLocation{ ViewportSize.X / 2.f + 50.f, ViewportSize.Y / 2.f - 50.f };
-		FVector CrosshairWorldLocation, CrosshairWorldDirection;
-		if (UGameplayStatics::DeprojectScreenToWorld(UGameplayStatics::GetPlayerController(this, 0), 
-			CrossHairScreenLocation, CrosshairWorldLocation, CrosshairWorldDirection))
-		{
-			FHitResult CrosshairTraceHitResult;
-			//const FVector StartLocation{ SocketTransform.GetLocation() };
-			const FVector StartLocation{ CrosshairWorldLocation };
-			//const FQuat StartRotation{ SocketTransform.GetRotation() };
-			//const FVector Direction{ StartRotation.GetAxisX() };
-			const FVector Direction{ CrosshairWorldDirection };
-			const FVector EndLocation{ StartLocation + Direction * 50'000.f };
-			FVector TrailEffectTarget{ EndLocation };
-			GetWorld()->LineTraceSingleByChannel(CrosshairTraceHitResult, StartLocation, EndLocation, ECollisionChannel::ECC_Visibility);
-			
-			if (CrosshairTraceHitResult.bBlockingHit)
-			{
-				//DrawDebugLine(GetWorld(), StartLocation, EndLocation, FColor::Red, false, 2.f);
-				//DrawDebugPoint(GetWorld(), HitResult.Location, 10.f, FColor::Red, false, 2.f);
-				TrailEffectTarget = CrosshairTraceHitResult.ImpactPoint;
-			}
-
-			// Perform a second trace from the gun barrel
-			FHitResult WeaponTraceHit;
-			const FVector WeaponTraceStart{ SocketTransform.GetLocation() };
-			const FVector WeaponTraceEnd{ TrailEffectTarget };
-			GetWorld()->LineTraceSingleByChannel(WeaponTraceHit, WeaponTraceStart, WeaponTraceEnd, ECollisionChannel::ECC_Visibility);
-
-			if (WeaponTraceHit.bBlockingHit)
-			{
-				TrailEffectTarget = WeaponTraceHit.ImpactPoint;
-			}
-
-			if (ImpactEffect)
-			{
-				UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), ImpactEffect, TrailEffectTarget);
-			}
-
-			if (TrailEffect)
-			{
-				UParticleSystemComponent* ParticleComponent = UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), TrailEffect, SocketTransform);
-				check(ParticleComponent);
-				ParticleComponent->SetVectorParameter(FName{ TEXT("Target") }, TrailEffectTarget);
-			}
-		}
-		*/
 	}
-	
+}
+
+void AApplePieCharacter::PlayWeaponFireAnimation()
+{
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 	if (AnimInstance && HipFireMontage)
 	{
 		AnimInstance->Montage_Play(HipFireMontage);
 		AnimInstance->Montage_JumpToSection(TEXT("StartFire"));
 	}
-
-	// Start bullet fire time for crosshair
-	StartCrosshairBulletFire();
 }
 
 void AApplePieCharacter::AimingButtonPressed()
@@ -294,45 +374,6 @@ void AApplePieCharacter::AimingButtonReleased()
 
 bool AApplePieCharacter::GetWeaponFireImpactLocation(const FVector& SocketLocation, FVector& OutImpactLocation) const
 {
-	/*
-	FVector2D ViewportSize;
-	if (GEngine && GEngine->GameViewport)
-	{
-		GEngine->GameViewport->GetViewportSize(ViewportSize);
-	}
-
-	// TODO: Find a way to not hardcode this
-	const FVector2D CrossHairScreenLocation{ ViewportSize.X / 2.f + 50.f, ViewportSize.Y / 2.f - 50.f };
-	FVector CrosshairWorldLocation, CrosshairWorldDirection;
-
-	if (UGameplayStatics::DeprojectScreenToWorld(UGameplayStatics::GetPlayerController(this, 0),
-		CrossHairScreenLocation, CrosshairWorldLocation, CrosshairWorldDirection))
-	{
-		FHitResult ScreenTraceHitResult;
-		const FVector ScreenTraceStartLocation{ CrosshairWorldLocation };
-		const FVector ScreenTraceEndLocation{ ScreenTraceStartLocation + CrosshairWorldDirection * 50'000.f };
-		OutImpactLocation = ScreenTraceEndLocation;
-		GetWorld()->LineTraceSingleByChannel(ScreenTraceHitResult, ScreenTraceStartLocation, ScreenTraceEndLocation, ECollisionChannel::ECC_Visibility);
-
-		if (ScreenTraceHitResult.bBlockingHit)
-		{
-			OutImpactLocation = ScreenTraceHitResult.ImpactPoint;
-		}
-
-		// Perform a second trace from the gun barrel
-		FHitResult WeaponTraceHit;
-		const FVector WeaponTraceStart{ SocketLocation };
-		const FVector WeaponTraceEnd{ OutImpactLocation };
-		GetWorld()->LineTraceSingleByChannel(WeaponTraceHit, WeaponTraceStart, WeaponTraceEnd, ECollisionChannel::ECC_Visibility);
-
-		if (WeaponTraceHit.bBlockingHit)
-		{
-			OutImpactLocation = WeaponTraceHit.ImpactPoint;
-		}
-
-		return true;
-	}
-	*/
 	FHitResult CrosshairsHitResult;
 	if (TraceUnderCrosshairs(CrosshairsHitResult, OutImpactLocation))
 	{
@@ -386,6 +427,16 @@ void AApplePieCharacter::InitializeAmmoMap()
 {
 	AmmoMap.Add(EAmmoType::EAT_9mm, Starting9mmAmmoCount);
 	AmmoMap.Add(EAmmoType::EAT_AR, StartingARAmmoCount);
+}
+
+bool AApplePieCharacter::WeaponHasAmmo() const
+{
+	if(!EquippedWeapon)
+	{
+		return false;
+	}
+
+	return EquippedWeapon->GetAmmoCount() > 0;
 }
 
 void AApplePieCharacter::TurnAtRate(float Rate)
@@ -468,7 +519,14 @@ void AApplePieCharacter::FinishCrosshairBulletFire()
 void AApplePieCharacter::FireButtonPressed()
 {
 	bFireButtonDown = true;
-	StartFireTimer();
+	FireWeapon();
+	/*
+	if (WeaponHasAmmo())
+	{
+		bFireButtonDown = true;
+		StartFireTimer();
+	}
+	*/
 }
 
 void AApplePieCharacter::FireButtonReleased()
@@ -478,20 +536,40 @@ void AApplePieCharacter::FireButtonReleased()
 
 void AApplePieCharacter::StartFireTimer()
 {
-	if (bShouldFire)
+	CombatState = ECombatState::ECS_FiringWeapon;
+
+	//if (bShouldFire)
 	{
-		FireWeapon();
-		bShouldFire = false;
-		GetWorldTimerManager().SetTimer(AutoFireTimer, this, &AApplePieCharacter::AutoFireReset, AutomaticFireRate);
+		//FireWeapon();
+		//bShouldFire = false;
 	}
+	
+	GetWorldTimerManager().SetTimer(AutoFireTimer, this, &AApplePieCharacter::AutoFireReset, AutomaticFireRate);
 }
 
 void AApplePieCharacter::AutoFireReset()
 {
-	bShouldFire = true;
-	if (bFireButtonDown)
+	CombatState = ECombatState::ECS_Unoccupied;
+	/*
+	if (CombatState == ECombatState::ECS_Unoccupied)
 	{
-		StartFireTimer();
+
+	}
+	*/
+
+	if (WeaponHasAmmo())
+	{
+		//bShouldFire = true;
+		if (bFireButtonDown)
+		{
+			//StartFireTimer();
+			FireWeapon();
+		}
+	}
+	else
+	{
+		// Reload weapon
+		ReloadWeapon();
 	}
 }
 
@@ -524,18 +602,6 @@ void AApplePieCharacter::EquipWeapon(AApplePieWeapon* Weapon)
 {
 	if (Weapon)
 	{
-		/*
-		if (UBoxComponent* Collider = Weapon->GetCollider())
-		{
-			Collider->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
-		}
-		
-		if (USphereComponent* PickupRadius = Weapon->GetPickupRadiusSphere())
-		{
-			PickupRadius->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
-		}
-		*/
-
 		if (const USkeletalMeshSocket* HandSocket = GetMesh()->GetSocketByName(TEXT("RightHandSocket")))
 		{
 			HandSocket->AttachActor(Weapon, GetMesh());
@@ -572,6 +638,11 @@ void AApplePieCharacter::SelectButtonPressed()
 		//SwapWeapon(Cast<AApplePieWeapon>(TraceHitItem));
 		Weapon->StartInterping(this);
 		TraceHitItem = LastTraceHitItem = nullptr;
+
+		if (USoundCue* Sound = Weapon->GetPickupSound())
+		{
+			UGameplayStatics::PlaySound2D(this, Sound);
+		}
 	}
 }
 
@@ -591,6 +662,11 @@ FVector AApplePieCharacter::GetCameraInterpLocation() const
 
 void AApplePieCharacter::GetPickupItem(AApplePieItem* Item)
 {
+	if (Item && Item->GetEquipSound())
+	{
+		UGameplayStatics::PlaySound2D(this, Item->GetEquipSound());
+	}
+
 	AApplePieWeapon* Weapon = Cast<AApplePieWeapon>(Item);
 	if (Weapon)
 	{
