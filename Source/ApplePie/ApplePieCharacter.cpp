@@ -71,11 +71,28 @@ AApplePieCharacter::AApplePieCharacter()
 	HandSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("HandSceneComp"));
 }
 
+static TEnableIf<true>::Type Sus()
+{
+	TSharedPtr<int> Yo;
+	//decltype(ImplicitConv<int*>((float*)nullptr) con;
+}
+
+struct SusStruct
+{
+	int a;
+	char b;
+};
+
 // Called when the game starts or when spawned
 void AApplePieCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	
+	TEnableIf<true, SusStruct>::Type Yo;
+	Yo.a = 2;
+	Yo.b = 'a';
+	Sus();
+
 	if (FollowCamera)
 	{
 		DefaultFOV = GetFollowCamera()->FieldOfView;

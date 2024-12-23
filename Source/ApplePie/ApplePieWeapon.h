@@ -67,4 +67,7 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon Properties", meta = (AllowPrivateAccess = "true"))
 	FName ClipBoneName;
+
+	UFUNCTION()
+	void Monke() { }
 };

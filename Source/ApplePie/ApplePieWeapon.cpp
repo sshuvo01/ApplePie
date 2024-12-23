@@ -30,6 +30,8 @@ void AApplePieWeapon::Tick(float DeltaTime)
 		const FRotator MeshRotation{ 0.f, GetMesh()->GetComponentRotation().Yaw, 0.f };
 		GetMesh()->SetWorldRotation(MeshRotation, false, nullptr, ETeleportType::TeleportPhysics);
 	}
+
+	AApplePieWeapon::__PPO__AmmoCount();
 }
 
 void AApplePieWeapon::Throw()
